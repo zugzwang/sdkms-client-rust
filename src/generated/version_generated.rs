@@ -6,8 +6,8 @@
 
 use super::*;
 
-/// Server mode.
-#[derive(Debug, Eq, PartialEq, Serialize, Deserialize, Clone)]
+/// Server execution mode.
+#[derive(Copy, PartialEq, Eq, Debug, Serialize, Deserialize, Clone)]
 pub enum ServerMode {
     Software,
     Sgx,

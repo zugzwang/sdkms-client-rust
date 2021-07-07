@@ -10,6 +10,7 @@ use hyper::method::Method;
 use operations::*;
 use std::collections::{HashMap, HashSet};
 use std::fmt;
+use std::net::IpAddr;
 use uuid::Uuid;
 
 mod accounts_generated;
@@ -71,6 +72,7 @@ impl Default for RsaOptions {
             public_exponent: None,
             encryption_policy: Vec::new(),
             signature_policy: Vec::new(),
+            minimum_key_length: None,
         }
     }
 }
@@ -97,24 +99,36 @@ impl fmt::Display for ApprovalStatus {
 
 impl Default for AppSort {
     fn default() -> Self {
-        AppSort::ByAppId { order: Order::Ascending, start: None }
+        AppSort::ByAppId {
+            order: Order::Ascending,
+            start: None,
+        }
     }
 }
 
 impl Default for SobjectSort {
     fn default() -> Self {
-        SobjectSort::ByKid { order: Order::Ascending, start: None }
+        SobjectSort::ByKid {
+            order: Order::Ascending,
+            start: None,
+        }
     }
 }
 
 impl Default for PluginSort {
     fn default() -> Self {
-        PluginSort::ByPluginId { order: Order::Ascending, start: None }
+        PluginSort::ByPluginId {
+            order: Order::Ascending,
+            start: None,
+        }
     }
 }
 
 impl Default for UserSort {
     fn default() -> Self {
-        UserSort::ByUserId { order: Order::Ascending, start: None }
+        UserSort::ByUserId {
+            order: Order::Ascending,
+            start: None,
+        }
     }
 }

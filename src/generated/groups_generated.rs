@@ -6,27 +6,134 @@
 
 use super::*;
 
+/// Group approval policy.
+#[derive(Debug, Eq, PartialEq, Serialize, Deserialize, Clone)]
+pub struct GroupApprovalPolicy {
+    #[serde(flatten)]
+    pub policy: QuorumPolicy,
+    /// When this is true, manage operations on security objects require approval.
+    pub protect_manage_operations: Option<bool>,
+    /// When this is true, cryptographic operations on security objects require approval.
+    pub protect_crypto_operations: Option<bool>,
+}
+
+#[derive(PartialEq, Eq, Hash, Debug, Serialize, Deserialize, Clone)]
+pub struct HmgConfig {
+    pub kind: HmgKind,
+    pub url: String,
+    pub tls: TlsConfig,
+    #[serde(default)]
+    pub slot: Option<usize>,
+    #[serde(default)]
+    pub pin: Option<String>,
+    #[serde(default)]
+    pub hsm_order: Option<i32>,
+    #[serde(default)]
+    pub access_key: Option<String>,
+    #[serde(default)]
+    pub secret_key: Option<String>,
+    #[serde(default)]
+    pub tenant_id: Option<String>,
+    #[serde(default)]
+    pub client_id: Option<String>,
+    #[serde(default)]
+    pub subscription_id: Option<Uuid>,
+    #[serde(default)]
+    pub key_vault_type: Option<String>,
+}
+
+#[derive(Eq, Debug, PartialEq, Hash, Copy, Serialize, Deserialize, Clone)]
+pub enum HmgRedundancyScheme {
+    PriorityFailover,
+}
+
+#[derive(Debug, Eq, PartialEq, Copy, Hash, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "UPPERCASE")]
+pub enum HmgKind {
+    Ncipher,
+    Safenet,
+    AwsCloudHsm,
+    Fortanix,
+    FortanixFipsCluster,
+    AwsKms,
+    AzureKeyVault,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct KeyVault {
+    pub id: String,
+    pub name: String,
+    pub vault_type: String,
+    pub location: String,
+    #[serde(default)]
+    pub tags: Option<HashMap<String, String>>,
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Group {
     pub acct_id: Uuid,
     #[serde(default)]
-    pub approval_policy: Option<ApprovalPolicy>,
+    pub approval_policy: Option<GroupApprovalPolicy>,
     pub created_at: Time,
     pub creator: Principal,
     #[serde(default)]
+    pub cryptographic_policy: Option<CryptographicPolicy>,
+    #[serde(default)]
+    pub custodian_policy: Option<QuorumPolicy>,
+    #[serde(default)]
     pub description: Option<String>,
     pub group_id: Uuid,
+    #[serde(default)]
+    pub hmg: Option<HashMap<Uuid, HmgConfig>>,
+    #[serde(default)]
+    pub hmg_redundancy: Option<HmgRedundancyScheme>,
+    #[serde(default)]
+    pub hmg_segregation: Option<bool>,
+    #[serde(default)]
+    pub hmg_sync: Option<bool>,
+    #[serde(default)]
+    pub key_history_policy: Option<KeyHistoryPolicy>,
     pub name: String,
 }
 
 #[derive(Default, Debug, Serialize, Deserialize, Clone)]
 pub struct GroupRequest {
     #[serde(default)]
-    pub approval_policy: Option<ApprovalPolicy>,
+    pub add_hmg: Option<Vec<HmgConfig>>,
+    #[serde(default)]
+    pub approval_policy: Option<GroupApprovalPolicy>,
+    #[serde(default)]
+    pub cryptographic_policy: Option<Option<CryptographicPolicy>>,
+    #[serde(default)]
+    pub custodian_policy: Option<QuorumPolicy>,
+    #[serde(default)]
+    pub del_hmg: Option<HashSet<Uuid>>,
     #[serde(default)]
     pub description: Option<String>,
     #[serde(default)]
+    pub hmg_redundancy: Option<HmgRedundancyScheme>,
+    #[serde(default)]
+    pub hmg_segregation: Option<bool>,
+    #[serde(default)]
+    pub hmg_sync: Option<bool>,
+    #[serde(default)]
+    pub key_history_policy: Option<Option<KeyHistoryPolicy>>,
+    #[serde(default)]
+    pub mod_hmg: Option<HashMap<Uuid, HmgConfig>>,
+    #[serde(default)]
     pub name: Option<String>,
+}
+
+#[derive(Debug, Eq, PartialEq, Serialize, Deserialize, Clone)]
+pub struct CheckHmgRequest {
+    /// The ID of the hmg configuration in the group.
+    pub id: Option<Uuid>,
+    pub config: Option<HmgConfig>,
+}
+
+#[derive(Debug, Eq, PartialEq, Serialize, Deserialize, Clone)]
+pub struct ScanHmgRequest {
+    pub config: Option<HmgConfig>,
 }
 
 pub struct OperationListGroups;
@@ -153,5 +260,93 @@ impl Operation for OperationDeleteGroup {
 impl SdkmsClient {
     pub fn delete_group(&self, id: &Uuid) -> Result<()> {
         self.execute::<OperationDeleteGroup>(&(), (id,), None)
+    }
+}
+
+pub struct OperationCheckHmgConfig;
+#[allow(unused)]
+impl Operation for OperationCheckHmgConfig {
+    type PathParams = ();
+    type QueryParams = ();
+    type Body = HmgConfig;
+    type Output = ();
+
+    fn method() -> Method {
+        Method::Post
+    }
+    fn path(p: <Self::PathParams as TupleRef>::Ref, q: Option<&Self::QueryParams>) -> String {
+        format!("/sys/v1/groups/hmg/check")
+    }
+}
+
+impl SdkmsClient {
+    pub fn check_hmg_config(&self, req: &HmgConfig) -> Result<()> {
+        self.execute::<OperationCheckHmgConfig>(req, (), None)
+    }
+}
+
+pub struct OperationGetVaults;
+#[allow(unused)]
+impl Operation for OperationGetVaults {
+    type PathParams = ();
+    type QueryParams = ();
+    type Body = HmgConfig;
+    type Output = Vec<KeyVault>;
+
+    fn method() -> Method {
+        Method::Post
+    }
+    fn path(p: <Self::PathParams as TupleRef>::Ref, q: Option<&Self::QueryParams>) -> String {
+        format!("/sys/v1/groups/hmg/azure_vaults")
+    }
+}
+
+impl SdkmsClient {
+    pub fn get_vaults(&self, req: &HmgConfig) -> Result<Vec<KeyVault>> {
+        self.execute::<OperationGetVaults>(req, (), None)
+    }
+}
+
+pub struct OperationCheckHmg;
+#[allow(unused)]
+impl Operation for OperationCheckHmg {
+    type PathParams = (Uuid,);
+    type QueryParams = ();
+    type Body = CheckHmgRequest;
+    type Output = ();
+
+    fn method() -> Method {
+        Method::Post
+    }
+    fn path(p: <Self::PathParams as TupleRef>::Ref, q: Option<&Self::QueryParams>) -> String {
+        format!("/sys/v1/groups/{id}/hmg/check", id = p.0)
+    }
+}
+
+impl SdkmsClient {
+    pub fn check_hmg(&self, id: &Uuid, req: &CheckHmgRequest) -> Result<()> {
+        self.execute::<OperationCheckHmg>(req, (id,), None)
+    }
+}
+
+pub struct OperationScanHmg;
+#[allow(unused)]
+impl Operation for OperationScanHmg {
+    type PathParams = (Uuid,);
+    type QueryParams = ();
+    type Body = ScanHmgRequest;
+    type Output = Vec<Sobject>;
+
+    fn method() -> Method {
+        Method::Post
+    }
+    fn path(p: <Self::PathParams as TupleRef>::Ref, q: Option<&Self::QueryParams>) -> String {
+        format!("/sys/v1/groups/{id}/hmg/scan", id = p.0)
+    }
+}
+
+impl SdkmsClient {
+    pub fn scan_hmg(&self, id: &Uuid, req: &ScanHmgRequest) -> Result<Vec<Sobject>> {
+        self.execute::<OperationScanHmg>(req, (id,), None)
     }
 }

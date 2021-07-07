@@ -14,25 +14,23 @@ pub enum Algorithm {
     Des,
     Des3,
     Rsa,
+    Dsa,
     Ec,
+    Lms,
     Hmac,
+    LedaBeta,
+    Round5Beta,
+    Pbe,
 }
 
-/// Cipher mode used for symmetric key algorithms.
 #[derive(Debug, Eq, PartialEq, Copy, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "UPPERCASE")]
-pub enum CipherMode {
-    Ecb,
-    Cbc,
-    CbcNoPad,
-    Cfb,
-    Ofb,
-    Ctr,
-    Gcm,
-    Ccm,
-    Kw,
-    Kwp,
-    Ff1,
+pub enum Pkcs8Mode {
+    PbeWithSHAAnd128BitRC4,
+    PbeWithSHAAnd3KeyTripleDesCbc,
+    PbeWithSHAAnd2KeyTripleDesCbc,
+    Pbes2WithPBKDF2AndKeyDes,
+    Pbes2WithPBKDF2AndKeyTripleDes,
 }
 
 /// A request to encrypt data using a symmetric or asymmetric key.
@@ -71,7 +69,7 @@ pub struct EncryptResponse {
     pub tag: Option<Blob>,
 }
 
-/// Initialize multi-part encryption. AEAD ciphers are not currently supported in this mode.
+/// Initialize multi-part encryption.
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct EncryptInitRequest {
     #[serde(default)]
@@ -82,6 +80,9 @@ pub struct EncryptInitRequest {
     pub mode: Option<CipherMode>,
     #[serde(default)]
     pub iv: Option<Blob>,
+    /// Authenticated data is only applicable when using GCM mode.
+    #[serde(default)]
+    pub ad: Option<Blob>,
 }
 
 /// Result of initializing multi-part encryption.
@@ -120,12 +121,18 @@ pub struct EncryptFinalRequest {
     #[serde(default)]
     pub key: Option<SobjectDescriptor>,
     pub state: Blob,
+    /// Tag length is only applicable when using GCM mode.
+    #[serde(default)]
+    pub tag_len: Option<usize>,
 }
 
 /// Final result of a multi-part encryption.
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct EncryptFinalResponse {
     pub cipher: Blob,
+    /// Tag is only returned for symmetric encryption with GCM mode.
+    #[serde(default)]
+    pub tag: Option<Blob>,
 }
 
 /// A request to decrypt data using a symmetric or asymmetric key.
@@ -159,7 +166,7 @@ pub struct DecryptResponse {
     pub plain: Blob,
 }
 
-/// Initialize multi-part decryption. AEAD ciphers are not currently supported in this mode.
+/// Initialize multi-part decryption.
 #[derive(Default, Debug, Serialize, Deserialize, Clone)]
 pub struct DecryptInitRequest {
     #[serde(default)]
@@ -172,6 +179,9 @@ pub struct DecryptInitRequest {
     /// Initialization vector is required for symmetric algorithms.
     #[serde(default)]
     pub iv: Option<Blob>,
+    /// Authenticated data is only applicable when using GCM mode.
+    #[serde(default)]
+    pub ad: Option<Blob>,
 }
 
 /// Result of initializing multi-part decryption.
@@ -207,6 +217,9 @@ pub struct DecryptFinalRequest {
     #[serde(default)]
     pub key: Option<SobjectDescriptor>,
     pub state: Blob,
+    /// Tag is only applicable when using GCM mode.
+    #[serde(default)]
+    pub tag: Option<Blob>,
 }
 
 /// Final result of a multi-part decryption.
@@ -371,6 +384,7 @@ pub struct AgreeKeyRequest {
 pub enum CryptMode {
     Symmetric(CipherMode),
     Rsa(RsaEncryptionPadding),
+    Pkcs8Mode(Pkcs8Mode),
 }
 
 /// Type of padding to use for RSA encryption. The use of PKCS#1 v1.5 padding is strongly
@@ -381,9 +395,19 @@ pub enum CryptMode {
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum RsaEncryptionPadding {
     /// Optimal Asymmetric Encryption Padding (PKCS#1 v2.1).
-    Oaep { mgf: Mgf },
+    Oaep {
+        mgf: Mgf,
+    },
     /// PKCS#1 v1.5 padding.
     Pkcs1V15 {},
+    RawDecrypt {},
+}
+
+/// Key Format
+#[derive(Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Clone)]
+pub enum KeyFormat {
+    Default,
+    Pkcs8,
 }
 
 /// Request to perform key wrapping.
@@ -410,6 +434,8 @@ pub struct WrapKeyRequest {
     /// Tag length is required when mode is GCM.
     #[serde(default)]
     pub tag_len: Option<usize>,
+    #[serde(default)]
+    pub key_format: Option<KeyFormat>,
 }
 
 /// Result of key wrapping operation.
@@ -469,6 +495,8 @@ pub struct UnwrapKeyRequest {
     pub key_ops: Option<KeyOperations>,
     #[serde(default)]
     pub transient: Option<bool>,
+    #[serde(default)]
+    pub kcv: Option<String>,
 }
 
 pub struct OperationEncrypt;

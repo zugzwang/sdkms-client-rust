@@ -6,27 +6,62 @@
 
 use super::*;
 
+/// Features in subscription
+pub use self::subscription_features::SubscriptionFeatures;
+pub mod subscription_features {
+    bitflags_set! {
+        pub struct SubscriptionFeatures: u64 {
+            const TOKENIZATION = 0x0000000000000001;
+            const HMG = 0x0000000000000002;
+            const AWSBYOK = 0x0000000000000004;
+            const AZUREBYOK = 0x0000000000000008;
+        }
+    }
+}
+
+/// Custom subscription type
+#[derive(Eq, PartialEq, Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "snake_case")]
+pub struct CustomSubscriptionType {
+    pub max_plugin: Option<u32>,
+    pub max_operation: Option<u64>,
+    pub count_transient_ops: Option<bool>,
+    pub package_name: Option<String>,
+    pub features: Option<SubscriptionFeatures>,
+    pub add_ons: Option<HashMap<String, String>>
+}
+
+/// Reseller subscription type
+#[derive(Eq, PartialEq, Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "snake_case")]
+pub struct ResellerSubscriptionType {
+    pub max_plugin: Option<u32>,
+    pub max_operation: Option<u64>,
+    pub max_tenant: Option<u32>,
+    pub max_tenant_plugin: Option<u32>,
+    pub max_tenant_operation: Option<u64>,
+    pub package_name: Option<String>,
+    pub features: Option<SubscriptionFeatures>,
+    pub add_ons: Option<HashMap<String, String>>,
+    pub tenant_features: Option<SubscriptionFeatures>
+}
+
 /// Type of subscription.
-#[derive(Copy, PartialEq, Eq, Debug, Serialize, Deserialize, Clone)]
+#[derive(PartialEq, Eq, Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "snake_case")]
 pub enum SubscriptionType {
     Trial {
-        expires_at: Option<Time>,
+        expires_at: Option<Time>
     },
     Standard,
     Enterprise,
-    Custom {
-        max_plugin: Option<u32>,
-        max_operation: Option<u64>,
-    },
+    Custom (
+        CustomSubscriptionType
+    ),
     OnPrem,
-    Reseller {
-        max_plugin: Option<u32>,
-        max_operation: Option<u64>,
-        max_tenant: Option<u32>,
-        max_tenant_plugin: Option<u32>,
-        max_tenant_operation: Option<u64>,
-    },
+    Reseller (
+        ResellerSubscriptionType
+    )
 }
 
 /// A request to update subscription type.
@@ -36,7 +71,7 @@ pub struct SubscriptionChangeRequest {
     #[serde(default)]
     pub contact: Option<String>,
     #[serde(default)]
-    pub comment: Option<String>,
+    pub comment: Option<String>
 }
 
 /// Notification preferences.
@@ -45,14 +80,14 @@ pub enum NotificationPref {
     None,
     Email,
     Phone,
-    Both,
+    Both
 }
 
 /// Password authentication settings.
 #[derive(PartialEq, Eq, Debug, Default, Serialize, Deserialize, Clone)]
 pub struct AuthConfigPassword {
     pub require_2fa: bool,
-    pub administrators_only: bool,
+    pub administrators_only: bool
 }
 
 /// OAuth single sign-on authentication settings.
@@ -67,14 +102,23 @@ pub struct AuthConfigOauth {
     pub idp_requires_basic_auth: bool,
     pub tls: TlsConfig,
     pub client_id: String,
-    pub client_secret: String,
+    pub client_secret: String
+}
+
+/// Vcd single sign-on authentication settings.
+#[derive(PartialEq, Eq, Debug, Serialize, Deserialize, Clone)]
+pub struct AuthConfigVcd {
+    pub idp_name: String,
+    pub idp_authorization_endpoint: String,
+    pub org: String,
+    pub tls: TlsConfig
 }
 
 /// Credentials used by the service to authenticate itself to an LDAP server.
 #[derive(PartialEq, Eq, Debug, Serialize, Deserialize, Clone)]
 pub struct LdapServiceAccount {
     pub dn: String,
-    pub password: String,
+    pub password: String
 }
 
 /// Distinguished Name (DN) resolution method. Given a user's email address, a DN resolution method
@@ -92,7 +136,7 @@ pub enum LdapDnResolution {
     /// Use email in place of DN. This method works with Active Directory if the userPrincipalName
     /// attribute is set for the user. https://docs.microsoft.com/en-us/windows/desktop/ad/naming-properties
     #[serde(rename = "upn")]
-    UserPrincipalName,
+    UserPrincipalName
 }
 
 /// LDAP authorization settings.
@@ -100,9 +144,10 @@ pub enum LdapDnResolution {
 pub struct LdapAuthorizationConfig {
     /// Number of seconds after which the authorization should be checked again.
     pub valid_for: u64,
-    /// Distinguished name of an LDAP group. If specified, account members must be a member of this
-    /// LDAP group to be able to select the accout.
-    pub require_role: Option<String>,
+    /// A map from account roles to distinguished names of LDAP groups.
+    /// If a DN is specified for an account role, entities with that role
+    /// must be a member of the specified LDAP group.
+    pub require_role: HashMap<AccountRole, String>
 }
 
 /// LDAP authentication settings.
@@ -120,14 +165,25 @@ pub struct AuthConfigLdap {
     #[serde(default)]
     pub service_account: Option<LdapServiceAccount>,
     #[serde(default)]
-    pub authorization: Option<LdapAuthorizationConfig>,
+    pub authorization: Option<LdapAuthorizationConfig>
 }
 
 /// Signed JWT authentication settings.
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize, Clone)]
 pub struct AuthConfigSignedJwt {
     pub valid_issuers: HashSet<String>,
-    pub signing_keys: JwtSigningKeys,
+    pub signing_keys: JwtSigningKeys
+}
+
+/// Role of a user or app in an account.
+#[derive(Copy, Debug, Eq, PartialEq, Hash, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum AccountRole {
+    AdminUser,
+    MemberUser,
+    AuditorUser,
+    AdminApp,
+    CryptoApp
 }
 
 /// Counts of objects of various types in an account.
@@ -138,54 +194,20 @@ pub struct ObjectCounts {
     pub users: u64,
     pub plugins: u64,
     pub sobjects: u64,
-}
-
-/// CA settings.
-#[derive(PartialEq, Eq, Debug, Serialize, Deserialize, Clone)]
-#[serde(rename_all = "snake_case")]
-pub enum CaConfig {
-    CaSet(CaSet),
-    Pinned(Vec<Blob>),
-}
-
-/// Predefined CA sets.
-#[derive(PartialEq, Eq, Debug, Serialize, Deserialize, Clone)]
-#[serde(rename_all = "snake_case")]
-pub enum CaSet {
-    GlobalRoots,
-}
-
-/// TLS settings.
-#[derive(PartialEq, Eq, Debug, Serialize, Deserialize, Clone)]
-#[serde(rename_all = "snake_case", tag = "mode")]
-pub enum TlsConfig {
-    Disabled,
-    Opportunistic,
-    Required {
-        validate_hostname: bool,
-        ca: CaConfig,
-    },
+    pub child_accounts: u64
 }
 
 /// Account approval policy.
 #[derive(Debug, Eq, PartialEq, Serialize, Deserialize, Clone)]
 pub struct AccountApprovalPolicy {
-    pub policy: ApprovalPolicy,
+    pub policy: QuorumPolicy,
     pub manage_groups: bool,
-}
-
-/// Syslog facility.
-#[derive(Copy, Debug, Eq, PartialEq, Serialize, Deserialize, Clone)]
-pub enum SyslogFacility {
-    User,
-    Local0,
-    Local1,
-    Local2,
-    Local3,
-    Local4,
-    Local5,
-    Local6,
-    Local7,
+    /// When this is true, changes to the account authentication methods require approval.
+    pub protect_authentication_methods: Option<bool>,
+    /// When this is true, changes to the account cryptographic policy requires approval.
+    pub protect_cryptographic_policy: Option<bool>,
+    /// When this is true, changes to logging configuration require approval.
+    pub protect_logging_config: Option<bool>
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -202,14 +224,22 @@ pub struct Account {
     #[serde(default)]
     pub created_at: Option<Time>,
     #[serde(default)]
+    pub cryptographic_policy: Option<CryptographicPolicy>,
+    #[serde(default)]
     pub custom_logo: Option<Blob>,
     #[serde(default)]
     pub custom_metadata: Option<HashMap<String, String>>,
     #[serde(default)]
     pub description: Option<String>,
+    #[serde(default)]
+    pub disabled_at: Option<Time>,
     pub enabled: bool,
     #[serde(default)]
     pub initial_purchase_at: Option<Time>,
+    #[serde(default)]
+    pub key_history_policy: Option<KeyHistoryPolicy>,
+    #[serde(default)]
+    pub log_bad_requests: Option<bool>,
     pub logging_configs: HashMap<Uuid, LoggingConfig>,
     #[serde(default)]
     pub max_app: Option<u32>,
@@ -240,7 +270,7 @@ pub struct Account {
     #[serde(default)]
     pub totals: Option<ObjectCounts>,
     #[serde(default)]
-    pub trial_expires_at: Option<Time>,
+    pub trial_expires_at: Option<Time>
 }
 
 #[derive(Default, Debug, Serialize, Deserialize, Clone)]
@@ -258,6 +288,8 @@ pub struct AccountRequest {
     #[serde(default)]
     pub country: Option<String>,
     #[serde(default)]
+    pub cryptographic_policy: Option<Option<CryptographicPolicy>>,
+    #[serde(default)]
     pub custom_logo: Option<Blob>,
     #[serde(default)]
     pub custom_metadata: Option<HashMap<String, String>>,
@@ -269,6 +301,10 @@ pub struct AccountRequest {
     pub description: Option<String>,
     #[serde(default)]
     pub enabled: Option<bool>,
+    #[serde(default)]
+    pub key_history_policy: Option<Option<KeyHistoryPolicy>>,
+    #[serde(default)]
+    pub log_bad_requests: Option<bool>,
     #[serde(default)]
     pub mod_ldap: Option<HashMap<Uuid, AuthConfigLdap>>,
     #[serde(default)]
@@ -288,16 +324,27 @@ pub struct AccountRequest {
     #[serde(default)]
     pub plugin_enabled: Option<bool>,
     #[serde(default)]
-    pub subscription: Option<SubscriptionType>,
+    pub subscription: Option<SubscriptionType>
+}
+
+#[derive(Default, Serialize, Deserialize, Clone)]
+pub struct AccountDeletionRequest {
+    /// The password is only needed if a sysadmin is deleting a stale account. (In fact, the
+    /// request body can be left empty in all other cases.)
+    pub password: Option<String>
 }
 
 #[derive(Serialize, Deserialize, Clone, Default)]
 pub struct GetAccountParams {
-    pub with_totals: bool,
+    pub user_id: Option<Uuid>,
+    pub with_totals: bool
 }
 
 impl UrlEncode for GetAccountParams {
     fn url_encode(&self, m: &mut HashMap<&'static str, String>) {
+        if let Some(ref v) = self.user_id {
+            m.insert("user_id", v.to_string());
+        }
         m.insert("with_totals", self.with_totals.to_string());
     }
 }
@@ -306,6 +353,7 @@ impl UrlEncode for GetAccountParams {
 pub struct CountParams {
     pub range_from: Option<u64>,
     pub range_to: Option<u64>,
+    pub detailed_usage: Option<bool>
 }
 
 impl UrlEncode for CountParams {
@@ -315,6 +363,9 @@ impl UrlEncode for CountParams {
         }
         if let Some(ref v) = self.range_to {
             m.insert("range_to", v.to_string());
+        }
+        if let Some(ref v) = self.detailed_usage {
+            m.insert("detailed_usage", v.to_string());
         }
     }
 }
@@ -326,7 +377,7 @@ pub struct SplunkLoggingConfig {
     pub host: String,
     pub port: u16,
     pub index: String,
-    pub tls: TlsConfig,
+    pub tls: TlsConfig
 }
 
 /// Stackdriver logging configuration.
@@ -335,7 +386,7 @@ pub struct StackdriverLoggingConfig {
     pub enabled: bool,
     /// The log ID that will recieve the log items (see https://cloud.google.com/logging/docs/reference/v2/rest/v2/LogEntry).
     pub log_id: String,
-    pub service_account_key: GoogleServiceAccountKey,
+    pub service_account_key: GoogleServiceAccountKey
 }
 
 #[derive(PartialEq, Eq, Debug, Serialize, Deserialize, Clone)]
@@ -343,7 +394,7 @@ pub struct StackdriverLoggingConfigRequest {
     pub enabled: Option<bool>,
     /// The log ID that will recieve the log items (see https://cloud.google.com/logging/docs/reference/v2/rest/v2/LogEntry).
     pub log_id: Option<String>,
-    pub service_account_key: Option<GoogleServiceAccountKey>,
+    pub service_account_key: Option<GoogleServiceAccountKey>
 }
 
 /// A Google service account key object. See https://cloud.google.com/video-intelligence/docs/common/auth.
@@ -355,7 +406,7 @@ pub struct GoogleServiceAccountKey {
     pub private_key_id: String,
     #[serde(default)]
     pub private_key: Option<String>,
-    pub client_email: String,
+    pub client_email: String
 }
 
 #[derive(Default, PartialEq, Eq, Debug, Serialize, Deserialize, Clone)]
@@ -373,7 +424,7 @@ pub struct SplunkLoggingConfigRequest {
     #[serde(default)]
     pub token: Option<String>,
     #[serde(default)]
-    pub tls: Option<TlsConfig>,
+    pub tls: Option<TlsConfig>
 }
 
 #[derive(PartialEq, Eq, Debug, Serialize, Deserialize, Clone)]
@@ -382,7 +433,7 @@ pub struct SyslogLoggingConfig {
     pub host: String,
     pub port: u16,
     pub tls: TlsConfig,
-    pub facility: SyslogFacility,
+    pub facility: SyslogFacility
 }
 
 #[derive(Default, PartialEq, Eq, Debug, Serialize, Deserialize, Clone)]
@@ -396,28 +447,54 @@ pub struct SyslogLoggingConfigRequest {
     #[serde(default)]
     pub tls: Option<TlsConfig>,
     #[serde(default)]
-    pub facility: Option<SyslogFacility>,
+    pub facility: Option<SyslogFacility>
 }
 
 #[derive(PartialEq, Eq, Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "snake_case")]
 pub enum LoggingConfig {
-    Splunk(SplunkLoggingConfig),
-    Stackdriver(StackdriverLoggingConfig),
-    Syslog(SyslogLoggingConfig),
+    Splunk (
+        SplunkLoggingConfig
+    ),
+    Stackdriver (
+        StackdriverLoggingConfig
+    ),
+    Syslog (
+        SyslogLoggingConfig
+    )
 }
 
 #[derive(PartialEq, Eq, Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "snake_case")]
 pub enum LoggingConfigRequest {
-    Splunk(SplunkLoggingConfigRequest),
-    Stackdriver(StackdriverLoggingConfigRequest),
-    Syslog(SyslogLoggingConfigRequest),
+    Splunk (
+        SplunkLoggingConfigRequest
+    ),
+    Stackdriver (
+        StackdriverLoggingConfigRequest
+    ),
+    Syslog (
+        SyslogLoggingConfigRequest
+    )
 }
 
 #[derive(Debug, Eq, PartialEq, Serialize, Deserialize, Clone)]
 pub struct GetUsageResponse {
     pub num_operations: u64,
+    #[serde(default)]
+    pub encryption_operations: Option<u64>,
+    #[serde(default)]
+    pub decryption_operations: Option<u64>,
+    #[serde(default)]
+    pub sign_operations: Option<u64>,
+    #[serde(default)]
+    pub verify_operations: Option<u64>,
+    #[serde(default)]
+    pub tokenization_operations: Option<u64>,
+    #[serde(default)]
+    pub detokenization_operations: Option<u64>,
+    #[serde(default)]
+    pub secrets_operations: Option<u64>
 }
 
 /// Account authentication settings.
@@ -433,6 +510,22 @@ pub struct AuthConfig {
     pub ldap: HashMap<Uuid, AuthConfigLdap>,
     #[serde(default)]
     pub signed_jwt: Option<AuthConfigSignedJwt>,
+    #[serde(default)]
+    pub vcd: Option<AuthConfigVcd>
+}
+
+/// Syslog facility.
+#[derive(Copy, Debug, Eq, PartialEq, Serialize, Deserialize, Clone)]
+pub enum SyslogFacility {
+    User,
+    Local0,
+    Local1,
+    Local2,
+    Local3,
+    Local4,
+    Local5,
+    Local6,
+    Local7
 }
 
 pub struct OperationListAccounts;
@@ -449,9 +542,7 @@ impl Operation for OperationListAccounts {
     fn path(p: <Self::PathParams as TupleRef>::Ref, q: Option<&Self::QueryParams>) -> String {
         format!("/sys/v1/accounts?{q}", q = q.encode())
     }
-    fn to_body(body: &Self::Body) -> Option<serde_json::Value> {
-        None
-    }
+    fn to_body(body: &Self::Body) -> Option<serde_json::Value> { None }
 }
 
 impl SdkmsClient {
@@ -474,17 +565,11 @@ impl Operation for OperationGetAccount {
     fn path(p: <Self::PathParams as TupleRef>::Ref, q: Option<&Self::QueryParams>) -> String {
         format!("/sys/v1/accounts/{id}?{q}", id = p.0, q = q.encode())
     }
-    fn to_body(body: &Self::Body) -> Option<serde_json::Value> {
-        None
-    }
+    fn to_body(body: &Self::Body) -> Option<serde_json::Value> { None }
 }
 
 impl SdkmsClient {
-    pub fn get_account(
-        &self,
-        id: &Uuid,
-        query_params: Option<&GetAccountParams>,
-    ) -> Result<Account> {
+    pub fn get_account(&self, id: &Uuid, query_params: Option<&GetAccountParams>) -> Result<Account> {
         self.execute::<OperationGetAccount>(&(), (id,), query_params)
     }
 }
@@ -509,11 +594,7 @@ impl SdkmsClient {
     pub fn create_account(&self, req: &AccountRequest) -> Result<Account> {
         self.execute::<OperationCreateAccount>(req, (), None)
     }
-    pub fn request_approval_to_create_account(
-        &self,
-        req: &AccountRequest,
-        description: Option<String>,
-    ) -> Result<PendingApproval<OperationCreateAccount>> {
+    pub fn request_approval_to_create_account(&self, req: &AccountRequest, description: Option<String>) -> Result<PendingApproval<OperationCreateAccount>> {
         self.request_approval::<OperationCreateAccount>(req, (), None, description)
     }
 }
@@ -538,12 +619,7 @@ impl SdkmsClient {
     pub fn update_account(&self, id: &Uuid, req: &AccountRequest) -> Result<Account> {
         self.execute::<OperationUpdateAccount>(req, (id,), None)
     }
-    pub fn request_approval_to_update_account(
-        &self,
-        id: &Uuid,
-        req: &AccountRequest,
-        description: Option<String>,
-    ) -> Result<PendingApproval<OperationUpdateAccount>> {
+    pub fn request_approval_to_update_account(&self, id: &Uuid, req: &AccountRequest, description: Option<String>) -> Result<PendingApproval<OperationUpdateAccount>> {
         self.request_approval::<OperationUpdateAccount>(req, (id,), None, description)
     }
 }
@@ -553,7 +629,7 @@ pub struct OperationDeleteAccount;
 impl Operation for OperationDeleteAccount {
     type PathParams = (Uuid,);
     type QueryParams = ();
-    type Body = ();
+    type Body = AccountDeletionRequest;
     type Output = ();
 
     fn method() -> Method {
@@ -562,14 +638,11 @@ impl Operation for OperationDeleteAccount {
     fn path(p: <Self::PathParams as TupleRef>::Ref, q: Option<&Self::QueryParams>) -> String {
         format!("/sys/v1/accounts/{id}", id = p.0)
     }
-    fn to_body(body: &Self::Body) -> Option<serde_json::Value> {
-        None
-    }
 }
 
 impl SdkmsClient {
-    pub fn delete_account(&self, id: &Uuid) -> Result<()> {
-        self.execute::<OperationDeleteAccount>(&(), (id,), None)
+    pub fn delete_account(&self, id: &Uuid, req: &AccountDeletionRequest) -> Result<()> {
+        self.execute::<OperationDeleteAccount>(req, (id,), None)
     }
 }
 
@@ -587,17 +660,11 @@ impl Operation for OperationAccountUsage {
     fn path(p: <Self::PathParams as TupleRef>::Ref, q: Option<&Self::QueryParams>) -> String {
         format!("/sys/v1/accounts/{id}/usage?{q}", id = p.0, q = q.encode())
     }
-    fn to_body(body: &Self::Body) -> Option<serde_json::Value> {
-        None
-    }
+    fn to_body(body: &Self::Body) -> Option<serde_json::Value> { None }
 }
 
 impl SdkmsClient {
-    pub fn account_usage(
-        &self,
-        id: &Uuid,
-        query_params: Option<&CountParams>,
-    ) -> Result<GetUsageResponse> {
+    pub fn account_usage(&self, id: &Uuid, query_params: Option<&CountParams>) -> Result<GetUsageResponse> {
         self.execute::<OperationAccountUsage>(&(), (id,), query_params)
     }
 }

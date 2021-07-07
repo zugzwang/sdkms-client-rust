@@ -13,10 +13,18 @@ pub enum ExternalRoleKind {
     LdapGroup,
 }
 
+#[derive(Copy, PartialEq, Eq, Debug, Serialize, Deserialize, Clone)]
+pub struct ExternalRoleMapping {
+    #[serde(default)]
+    pub users: Option<UserGroupRole>,
+    #[serde(default)]
+    pub apps: Option<AppPermissions>,
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ExternalRole {
     pub external_role_id: Uuid,
-    pub groups: HashMap<Uuid, UserGroupRole>,
+    pub groups: HashMap<Uuid, ExternalRoleMapping>,
     pub kind: ExternalRoleKind,
     pub last_synced: Time,
     pub name: String,
@@ -27,7 +35,7 @@ pub struct ExternalRole {
 #[derive(Default, Debug, Serialize, Deserialize, Clone)]
 pub struct ExternalRoleRequest {
     #[serde(default)]
-    pub add_groups: Option<HashMap<Uuid, UserGroupRole>>,
+    pub add_groups: Option<HashMap<Uuid, ExternalRoleMapping>>,
     #[serde(default)]
     pub del_groups: Option<HashSet<Uuid>>,
     #[serde(default)]
@@ -35,7 +43,7 @@ pub struct ExternalRoleRequest {
     #[serde(default)]
     pub kind: Option<ExternalRoleKind>,
     #[serde(default)]
-    pub mod_groups: Option<HashMap<Uuid, UserGroupRole>>,
+    pub mod_groups: Option<HashMap<Uuid, ExternalRoleMapping>>,
     #[serde(default)]
     pub name: Option<String>,
     #[serde(default)]

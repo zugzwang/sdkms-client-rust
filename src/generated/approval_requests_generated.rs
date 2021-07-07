@@ -10,8 +10,12 @@ use super::*;
 #[derive(Copy, PartialEq, Eq, Hash, Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "lowercase")]
 pub enum ReviewerPrincipal {
-    App(Uuid),
-    User(Uuid),
+    App (
+        Uuid
+    ),
+    User (
+        Uuid
+    )
 }
 
 /// Approval request status.
@@ -21,19 +25,29 @@ pub enum ApprovalStatus {
     Pending,
     Approved,
     Denied,
-    Failed,
+    Failed
 }
 
 /// Identifies an object acted upon by an approval request.
 #[derive(Copy, Eq, PartialEq, Hash, Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "lowercase")]
 pub enum ApprovalSubject {
-    Group(Uuid),
-    Sobject(Uuid),
-    App(Uuid),
-    Plugin(Uuid),
-    Account(Uuid),
-    NewAccount,
+    Group (
+        Uuid
+    ),
+    Sobject (
+        Uuid
+    ),
+    App (
+        Uuid
+    ),
+    Plugin (
+        Uuid
+    ),
+    Account (
+        Uuid
+    ),
+    NewAccount
 }
 
 /// Reviewer of an approval request.
@@ -44,7 +58,7 @@ pub struct Reviewer {
     #[serde(default)]
     pub requires_password: bool,
     #[serde(default)]
-    pub requires_2fa: bool,
+    pub requires_2fa: bool
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -54,6 +68,8 @@ pub struct ApprovalRequest {
     #[serde(default)]
     pub body: Option<serde_json::Value>,
     pub created_at: Time,
+    #[serde(default)]
+    pub denial_reason: Option<String>,
     #[serde(default)]
     pub denier: Option<ReviewerPrincipal>,
     #[serde(default)]
@@ -67,7 +83,7 @@ pub struct ApprovalRequest {
     pub reviewers: Option<Vec<Reviewer>>,
     pub status: ApprovalStatus,
     #[serde(default)]
-    pub subjects: Option<HashSet<ApprovalSubject>>,
+    pub subjects: Option<HashSet<ApprovalSubject>>
 }
 
 #[derive(Default, Debug, Serialize, Deserialize, Clone)]
@@ -79,7 +95,7 @@ pub struct ApprovalRequestRequest {
     #[serde(default)]
     pub method: Option<String>,
     #[serde(default)]
-    pub operation: Option<String>,
+    pub operation: Option<String>
 }
 
 #[derive(Serialize, Deserialize, Clone, Default)]
@@ -87,7 +103,7 @@ pub struct ListApprovalRequestsParams {
     pub requester: Option<Uuid>,
     pub reviewer: Option<Uuid>,
     pub subject: Option<Uuid>,
-    pub status: Option<ApprovalStatus>,
+    pub status: Option<ApprovalStatus>
 }
 
 impl UrlEncode for ListApprovalRequestsParams {
@@ -107,12 +123,20 @@ impl UrlEncode for ListApprovalRequestsParams {
     }
 }
 
-#[derive(Debug, Eq, PartialEq, Default, Serialize, Deserialize, Clone)]
+#[derive(Debug, Default, Serialize, Deserialize, Clone)]
 pub struct ApproveRequest {
     /// Password is required if the approval policy requires password authentication.
     pub password: Option<String>,
     /// U2F is required if the approval policy requires two factor authentication.
     pub u2f: Option<U2fAuthRequest>,
+    /// Data associated with the approval
+    #[serde(default)]
+    pub body: Option<serde_json::Value>
+}
+
+#[derive(Debug, Default, Serialize, Deserialize, Clone)]
+pub struct DenyRequest {
+    pub reason: Option<String>
 }
 
 pub struct OperationListApprovalRequests;
@@ -135,10 +159,7 @@ impl Operation for OperationListApprovalRequests {
 }
 
 impl SdkmsClient {
-    pub fn list_approval_requests(
-        &self,
-        query_params: Option<&ListApprovalRequestsParams>,
-    ) -> Result<Vec<ApprovalRequest>> {
+    pub fn list_approval_requests(&self, query_params: Option<&ListApprovalRequestsParams>) -> Result<Vec<ApprovalRequest>> {
         self.execute::<OperationListApprovalRequests>(&(), (), query_params)
     }
 }
@@ -217,7 +238,7 @@ pub struct OperationDenyRequest;
 impl Operation for OperationDenyRequest {
     type PathParams = (Uuid,);
     type QueryParams = ();
-    type Body = ();
+    type Body = DenyRequest;
     type Output = ApprovalRequest;
 
     fn method() -> Method {
@@ -226,14 +247,11 @@ impl Operation for OperationDenyRequest {
     fn path(p: <Self::PathParams as TupleRef>::Ref, q: Option<&Self::QueryParams>) -> String {
         format!("/sys/v1/approval_requests/{id}/deny", id = p.0)
     }
-    fn to_body(body: &Self::Body) -> Option<serde_json::Value> {
-        None
-    }
 }
 
 impl SdkmsClient {
-    pub fn deny_request(&self, id: &Uuid) -> Result<ApprovalRequest> {
-        self.execute::<OperationDenyRequest>(&(), (id,), None)
+    pub fn deny_request(&self, id: &Uuid, req: &DenyRequest) -> Result<ApprovalRequest> {
+        self.execute::<OperationDenyRequest>(req, (id,), None)
     }
 }
 

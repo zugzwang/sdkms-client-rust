@@ -71,6 +71,7 @@ pub struct Plugin {
     #[serde(default)]
     pub lastrun_at: Option<Time>,
     pub lastupdated_at: Time,
+    pub legacy_access: bool,
     pub name: String,
     pub plugin_id: Uuid,
     pub plugin_type: PluginType,

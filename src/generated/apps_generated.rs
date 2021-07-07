@@ -6,41 +6,77 @@
 
 use super::*;
 
-/// Operations allowed to be performed by an app.
-pub use self::app_permissions::AppPermissions;
-pub mod app_permissions {
-    bitflags_set! {
-        pub struct AppPermissions: u64 {
-            const SIGN = 0x0000000000000001;
-            const VERIFY = 0x0000000000000002;
-            const ENCRYPT = 0x0000000000000004;
-            const DECRYPT = 0x0000000000000008;
-            const WRAPKEY = 0x0000000000000010;
-            const UNWRAPKEY = 0x0000000000000020;
-            const DERIVEKEY = 0x0000000000000040;
-            const MACGENERATE = 0x0000000000000080;
-            const MACVERIFY = 0x0000000000000100;
-            const EXPORT = 0x0000000000000200;
-            const MANAGE = 0x0000000000000400;
-            const AGREEKEY = 0x0000000000000800;
-            const MASKDECRYPT = 0x0000000000001000;
-        }
-    }
+/// App's role.
+#[derive(Debug, Eq, PartialEq, Copy, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "snake_case")]
+pub enum AppRole {
+    Admin,
+    Crypto
 }
 
 /// OAuth settings for an app. If enabled, an app can request to act on behalf of a user.
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "snake_case", tag = "state")]
 pub enum AppOauthConfig {
-    Enabled { redirect_uris: Vec<String> },
-    Disabled,
+    Enabled {
+        redirect_uris: Vec<String>
+    },
+    Disabled
+}
+
+#[derive(PartialEq, Eq, Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "snake_case")]
+pub enum SubjectGeneral {
+    DirectoryName (
+        Vec <[String; 2]>
+    ),
+    DnsName (
+        String
+    ),
+    IpAddress (
+        IpAddr
+    )
+}
+
+#[derive(PartialEq, Eq, Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "snake_case")]
+pub enum TrustAnchorSubject {
+    Subject(
+        Vec<[String; 2]>
+    ),
+    SubjectGeneral(
+        SubjectGeneral
+    )
 }
 
 /// A trusted CA for app authentication.
 #[derive(PartialEq, Eq, Debug, Serialize, Deserialize, Clone)]
 pub struct TrustAnchor {
-    pub subject: Vec<[String; 2]>,
-    pub ca_certificate: Blob,
+    #[serde(flatten)]
+    pub subject: TrustAnchorSubject,
+    pub ca_certificate: Blob
+}
+
+/// An access reason provided by Google when making EKMS API calls.
+#[derive(Debug, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum GoogleAccessReason {
+    ReasonUnspecified = 0,
+    CustomerInitiatedSupport = 1,
+    GoogleInitiatedService = 2,
+    ThirdPartyDataRequest = 3,
+    GoogleInitiatedReview = 4,
+    CustomerInitiatedAccess = 5,
+    GoogleInitiatedSystemOperation = 6,
+    ReasonNotExpected = 7,
+    ModifiedCustomerInitiatedAccess = 8
+}
+
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "snake_case")]
+pub struct GoogleAccessReasonPolicy {
+    pub allow: HashSet<GoogleAccessReason>,
+    pub allow_missing_reason: bool
 }
 
 /// App authentication mechanisms.
@@ -50,21 +86,40 @@ pub enum AppCredential {
     Secret(String),
     Certificate(Blob),
     TrustedCa(TrustAnchor),
-    GoogleServiceAccount {},
+    GoogleServiceAccount {
+        #[serde(default)]
+        access_reason_policy: Option<GoogleAccessReasonPolicy>,
+    },
     SignedJwt {
         valid_issuers: HashSet<String>,
         signing_keys: JwtSigningKeys,
     },
+    Ldap(Uuid)
 }
 
 /// Authentication method of an app.
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize, Clone)]
 pub enum AppAuthType {
     Secret,
     Certificate,
     TrustedCa,
     GoogleServiceAccount,
     SignedJwt,
+    Ldap
+}
+
+#[derive(PartialEq, Eq, Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "snake_case")]
+pub enum IpAddressPolicy {
+    AllowAll,
+    Whitelist(HashSet<String>)
+}
+
+/// Expired credentials that are still valid for a transitional period
+#[derive(PartialEq, Eq, Debug, Serialize, Deserialize, Clone)]
+pub struct PreviousCredential {
+    pub credential: AppCredential,
+    pub valid_until: Time
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -86,11 +141,14 @@ pub struct App {
     pub groups: AppGroups,
     #[serde(default)]
     pub interface: Option<String>,
+    pub ip_address_policy: IpAddressPolicy,
     #[serde(default)]
     pub lastused_at: Option<Time>,
+    pub legacy_access: bool,
     pub name: String,
     #[serde(default)]
     pub oauth_config: Option<AppOauthConfig>,
+    pub role: AppRole
 }
 
 #[derive(Default, Debug, Serialize, Deserialize, Clone)]
@@ -102,6 +160,8 @@ pub struct AppRequest {
     #[serde(default)]
     pub credential: Option<AppCredential>,
     #[serde(default)]
+    pub credential_migration_period: Option<u32>,
+    #[serde(default)]
     pub default_group: Option<Uuid>,
     #[serde(default)]
     pub del_groups: Option<HashSet<Uuid>>,
@@ -112,13 +172,17 @@ pub struct AppRequest {
     #[serde(default)]
     pub interface: Option<String>,
     #[serde(default)]
+    pub ip_address_policy: Option<IpAddressPolicy>,
+    #[serde(default)]
     pub mod_groups: Option<AppGroups>,
     #[serde(default)]
     pub name: Option<String>,
     #[serde(default)]
     pub oauth_config: Option<AppOauthConfig>,
     #[serde(default)]
-    pub secret_size: Option<u32>,
+    pub role: Option<AppRole>,
+    #[serde(default)]
+    pub secret_size: Option<u32>
 }
 
 #[derive(Default, Debug, Serialize, Deserialize, Clone)]
@@ -126,6 +190,8 @@ pub struct AppResetSecretRequest {
     /// Size of app's secret in bytes.
     #[serde(default)]
     pub secret_size: Option<u32>,
+    #[serde(default)]
+    pub credential_migration_period: Option<u32>
 }
 
 /// App credential response.
@@ -133,20 +199,26 @@ pub struct AppResetSecretRequest {
 pub struct AppCredentialResponse {
     pub app_id: Uuid,
     pub credential: AppCredential,
+    #[serde(default)]
+    pub previous_credential: Option<PreviousCredential>
 }
 
 #[derive(Serialize, Deserialize, Clone, Default)]
 pub struct GetAppParams {
     pub group_permissions: bool,
+    pub role: Option<String>
 }
 
 impl UrlEncode for GetAppParams {
     fn url_encode(&self, m: &mut HashMap<&'static str, String>) {
         m.insert("group_permissions", self.group_permissions.to_string());
+        if let Some(ref v) = self.role {
+            m.insert("role", v.to_string());
+        }
     }
 }
 
-#[derive(Serialize, Deserialize, Clone, Default)]
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct ListAppsParams {
     pub group_id: Option<Uuid>,
     pub limit: Option<usize>,
@@ -154,6 +226,7 @@ pub struct ListAppsParams {
     #[serde(flatten)]
     pub sort: AppSort,
     pub group_permissions: bool,
+    pub role: Option<AppRole>
 }
 
 impl UrlEncode for ListAppsParams {
@@ -169,12 +242,24 @@ impl UrlEncode for ListAppsParams {
         }
         self.sort.url_encode(m);
         m.insert("group_permissions", self.group_permissions.to_string());
+        if let Some(ref v) = self.role {
+            m.insert("role", v.as_str());
+        }
     }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum AppSort {
-    ByAppId { order: Order, start: Option<Uuid> },
+    ByAppId { order: Order, start: Option<Uuid> }
+}
+
+impl AppRole {
+    pub fn as_str(&self) -> String {
+        match *self {
+            AppRole::Admin => "admin".to_string(),
+            AppRole::Crypto => "app".to_string(),
+        }
+    }
 }
 
 impl UrlEncode for AppSort {
@@ -290,6 +375,15 @@ impl SdkmsClient {
     ) -> Result<App> {
         self.execute::<OperationUpdateApp>(req, (id,), query_params)
     }
+    pub fn request_approval_to_update_app(
+        &self,
+        id: &Uuid,
+        query_params: Option<&GetAppParams>,
+        req: &AppRequest,
+        description: Option<String>,
+    ) -> Result<PendingApproval<OperationUpdateApp>> {
+        self.request_approval::<OperationUpdateApp>(req, (id,), query_params, description)
+    }
 }
 
 pub struct OperationDeleteApp;
@@ -345,6 +439,15 @@ impl SdkmsClient {
         req: &AppResetSecretRequest,
     ) -> Result<App> {
         self.execute::<OperationResetAppSecret>(req, (id,), query_params)
+    }
+    pub fn request_approval_to_reset_app_secret(
+        &self,
+        id: &Uuid,
+        query_params: Option<&GetAppParams>,
+        req: &AppResetSecretRequest,
+        description: Option<String>,
+    ) -> Result<PendingApproval<OperationResetAppSecret>> {
+        self.request_approval::<OperationResetAppSecret>(req, (id,), query_params, description)
     }
 }
 

@@ -11,13 +11,21 @@ pub struct SobjectRequest {
     #[serde(default)]
     pub activation_date: Option<Time>,
     #[serde(default)]
+    pub aes: Option<AesOptions>,
+    #[serde(default)]
     pub custom_metadata: Option<HashMap<String, String>>,
     #[serde(default)]
     pub deactivation_date: Option<Time>,
     #[serde(default)]
+    pub des: Option<DesOptions>,
+    #[serde(default)]
+    pub des3: Option<Des3Options>,
+    #[serde(default)]
     pub description: Option<String>,
     #[serde(default)]
     pub deterministic_signatures: Option<bool>,
+    #[serde(default)]
+    pub dsa: Option<DsaOptions>,
     #[serde(default)]
     pub elliptic_curve: Option<EllipticCurve>,
     #[serde(default)]
@@ -25,9 +33,15 @@ pub struct SobjectRequest {
     #[serde(default)]
     pub fpe: Option<FpeOptions>,
     #[serde(default)]
+    pub kcv: Option<String>,
+    #[serde(default)]
     pub key_ops: Option<KeyOperations>,
     #[serde(default)]
     pub key_size: Option<u32>,
+    #[serde(default)]
+    pub links: Option<KeyLinks>,
+    #[serde(default)]
+    pub lms: Option<LmsOptions>,
     #[serde(default)]
     pub name: Option<String>,
     #[serde(default)]
@@ -36,6 +50,8 @@ pub struct SobjectRequest {
     pub pub_exponent: Option<u32>,
     #[serde(default)]
     pub publish_public_key: Option<PublishPublicKeyConfig>,
+    #[serde(default)]
+    pub rotation_policy: Option<RotationPolicy>,
     #[serde(default)]
     pub rsa: Option<RsaOptions>,
     #[serde(default)]
@@ -91,6 +107,22 @@ pub struct PersistTransientKeyRequest {
     pub transient_key: Blob,
 }
 
+/// Request to copy a security object
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct CopySobjectRequest {
+    pub key: SobjectDescriptor,
+    #[serde(flatten)]
+    pub dest: SobjectRequest,
+}
+
+/// Request to rekey a security object
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct SobjectRekeyRequest {
+    pub deactivate_rotated_key: bool,
+    #[serde(flatten)]
+    pub dest: SobjectRequest,
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct ListSobjectsParams {
     pub group_id: Option<Uuid>,
@@ -100,6 +132,13 @@ pub struct ListSobjectsParams {
     pub offset: Option<usize>,
     #[serde(flatten)]
     pub sort: SobjectSort,
+    pub compliant_with_policies: Option<bool>,
+    #[serde(flatten)]
+    pub custom_metadata: Option<HashMap<String, String>>,
+    pub show_destroyed: bool,
+    pub show_deleted: bool,
+    pub show_value: bool,
+    pub show_pub_key: bool,
 }
 
 impl UrlEncode for ListSobjectsParams {
@@ -120,17 +159,35 @@ impl UrlEncode for ListSobjectsParams {
             m.insert("offset", v.to_string());
         }
         self.sort.url_encode(m);
+        if let Some(ref v) = self.compliant_with_policies {
+            m.insert("compliant_with_policies", v.to_string());
+        }
+        // if let Some(map) = self.custom_metadata {
+        //     map.url_encode(m);
+        // }
+        m.insert("show_destroyed", self.show_destroyed.to_string());
+        m.insert("show_deleted", self.show_deleted.to_string());
+        m.insert("show_value", self.show_value.to_string());
+        m.insert("show_pub_key", self.show_pub_key.to_string());
     }
 }
 
 #[derive(Serialize, Deserialize, Clone, Default)]
 pub struct GetSobjectParams {
     pub view: SobjectEncoding,
+    pub show_destroyed: bool,
+    pub show_deleted: bool,
+    pub show_value: bool,
+    pub show_pub_key: bool,
 }
 
 impl UrlEncode for GetSobjectParams {
     fn url_encode(&self, m: &mut HashMap<&'static str, String>) {
         m.insert("view", self.view.to_string());
+        m.insert("show_destroyed", self.show_destroyed.to_string());
+        m.insert("show_deleted", self.show_deleted.to_string());
+        m.insert("show_value", self.show_value.to_string());
+        m.insert("show_pub_key", self.show_pub_key.to_string());
     }
 }
 
@@ -141,7 +198,7 @@ pub enum SobjectEncoding {
     Value,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, PartialEq, Serialize, Deserialize, Clone)]
 pub enum SobjectSort {
     ByKid { order: Order, start: Option<Uuid> },
     ByName { order: Order, start: Option<String> },
@@ -352,6 +409,13 @@ impl SdkmsClient {
     pub fn remove_private(&self, id: &Uuid) -> Result<()> {
         self.execute::<OperationRemovePrivate>(&(), (id,), None)
     }
+    pub fn request_approval_to_remove_private(
+        &self,
+        id: &Uuid,
+        description: Option<String>,
+    ) -> Result<PendingApproval<OperationRemovePrivate>> {
+        self.request_approval::<OperationRemovePrivate>(&(), (id,), None, description)
+    }
 }
 
 pub struct OperationExportSobject;
@@ -432,7 +496,7 @@ pub struct OperationRotateSobject;
 impl Operation for OperationRotateSobject {
     type PathParams = ();
     type QueryParams = ();
-    type Body = SobjectRequest;
+    type Body = SobjectRekeyRequest;
     type Output = Sobject;
 
     fn method() -> Method {
@@ -444,8 +508,15 @@ impl Operation for OperationRotateSobject {
 }
 
 impl SdkmsClient {
-    pub fn rotate_sobject(&self, req: &SobjectRequest) -> Result<Sobject> {
+    pub fn rotate_sobject(&self, req: &SobjectRekeyRequest) -> Result<Sobject> {
         self.execute::<OperationRotateSobject>(req, (), None)
+    }
+    pub fn request_approval_to_rotate_sobject(
+        &self,
+        req: &SobjectRekeyRequest,
+        description: Option<String>,
+    ) -> Result<PendingApproval<OperationRotateSobject>> {
+        self.request_approval::<OperationRotateSobject>(req, (), None, description)
     }
 }
 
@@ -493,6 +564,43 @@ impl Operation for OperationRevokeSobject {
 impl SdkmsClient {
     pub fn revoke_sobject(&self, id: &Uuid, req: &RevocationReason) -> Result<()> {
         self.execute::<OperationRevokeSobject>(req, (id,), None)
+    }
+    pub fn request_approval_to_revoke_sobject(
+        &self,
+        id: &Uuid,
+        req: &RevocationReason,
+        description: Option<String>,
+    ) -> Result<PendingApproval<OperationRevokeSobject>> {
+        self.request_approval::<OperationRevokeSobject>(req, (id,), None, description)
+    }
+}
+
+pub struct OperationCopySobject;
+#[allow(unused)]
+impl Operation for OperationCopySobject {
+    type PathParams = ();
+    type QueryParams = ();
+    type Body = CopySobjectRequest;
+    type Output = Sobject;
+
+    fn method() -> Method {
+        Method::Post
+    }
+    fn path(p: <Self::PathParams as TupleRef>::Ref, q: Option<&Self::QueryParams>) -> String {
+        format!("/crypto/v1/keys/copy")
+    }
+}
+
+impl SdkmsClient {
+    pub fn copy_sobject(&self, req: &CopySobjectRequest) -> Result<Sobject> {
+        self.execute::<OperationCopySobject>(req, (), None)
+    }
+    pub fn request_approval_to_copy_sobject(
+        &self,
+        req: &CopySobjectRequest,
+        description: Option<String>,
+    ) -> Result<PendingApproval<OperationCopySobject>> {
+        self.request_approval::<OperationCopySobject>(req, (), None, description)
     }
 }
 

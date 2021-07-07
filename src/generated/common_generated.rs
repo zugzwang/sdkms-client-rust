@@ -6,6 +6,16 @@
 
 use super::*;
 
+#[derive(Debug, Eq, PartialEq, Copy, Serialize, Deserialize, Clone)]
+pub enum SobjectState {
+    PreActive,
+    Active,
+    Deactivated,
+    Compromised,
+    Destroyed,
+    Deleted,
+}
+
 /// Operations allowed to be performed on a given key.
 pub use self::key_operations::KeyOperations;
 pub mod key_operations {
@@ -28,6 +38,29 @@ pub mod key_operations {
     }
 }
 
+/// Operations allowed to be performed by an app.
+pub use self::app_permissions::AppPermissions;
+pub mod app_permissions {
+    bitflags_set! {
+        pub struct AppPermissions: u64 {
+            const SIGN = 0x0000000000000001;
+            const VERIFY = 0x0000000000000002;
+            const ENCRYPT = 0x0000000000000004;
+            const DECRYPT = 0x0000000000000008;
+            const WRAPKEY = 0x0000000000000010;
+            const UNWRAPKEY = 0x0000000000000020;
+            const DERIVEKEY = 0x0000000000000040;
+            const MACGENERATE = 0x0000000000000080;
+            const MACVERIFY = 0x0000000000000100;
+            const EXPORT = 0x0000000000000200;
+            const MANAGE = 0x0000000000000400;
+            const AGREEKEY = 0x0000000000000800;
+            const MASKDECRYPT = 0x0000000000001000;
+            const AUDIT = 0x0000000000002000;
+        }
+    }
+}
+
 /// Type of security object.
 #[derive(Debug, Eq, PartialEq, Copy, Hash, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "UPPERCASE")]
@@ -36,11 +69,16 @@ pub enum ObjectType {
     Des,
     Des3,
     Rsa,
+    Dsa,
     Ec,
     Opaque,
     Hmac,
+    LedaBeta,
+    Round5Beta,
     Secret,
+    Lms,
     Certificate,
+    Pbe,
 }
 
 /// The origin of a security object - where it was created / generated.
@@ -69,13 +107,21 @@ pub enum EllipticCurve {
 }
 
 /// Linked security objects.
-#[derive(PartialEq, Eq, Debug, Serialize, Deserialize, Clone)]
+#[derive(PartialEq, Eq, Debug, Default, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct KeyLinks {
     #[serde(default)]
     pub replacement: Option<Uuid>,
     #[serde(default)]
     pub replaced: Option<Uuid>,
+    #[serde(default)]
+    pub copied_from: Option<Uuid>,
+    #[serde(default)]
+    pub copied_to: Option<Vec<Uuid>>,
+    #[serde(default)]
+    pub subkeys: Vec<Uuid>,
+    #[serde(default)]
+    pub parent: Option<Uuid>,
 }
 
 /// A security principal.
@@ -92,6 +138,23 @@ pub enum Principal {
     },
 }
 
+/// Cipher mode used for symmetric key algorithms.
+#[derive(Debug, Eq, PartialEq, Copy, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "UPPERCASE")]
+pub enum CipherMode {
+    Ecb,
+    Cbc,
+    CbcNoPad,
+    Cfb,
+    Ofb,
+    Ctr,
+    Gcm,
+    Ccm,
+    Kw,
+    Kwp,
+    Ff1,
+}
+
 /// A hash algorithm.
 #[derive(Debug, Eq, PartialEq, Copy, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "UPPERCASE")]
@@ -103,6 +166,7 @@ pub enum DigestAlgorithm {
     Ripemd160,
     Ssl3,
     Sha1,
+    Sha224,
     Sha256,
     Sha384,
     Sha512,
@@ -146,6 +210,35 @@ pub enum JwtSigningKeys {
     },
 }
 
+/// CA settings.
+#[derive(PartialEq, Eq, Hash, Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "snake_case")]
+pub enum CaConfig {
+    CaSet(CaSet),
+    Pinned(Vec<Blob>),
+}
+
+/// Predefined CA sets.
+#[derive(PartialEq, Eq, Hash, Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "snake_case")]
+pub enum CaSet {
+    GlobalRoots,
+}
+
+/// TLS settings.
+#[derive(PartialEq, Eq, Hash, Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "snake_case", tag = "mode")]
+pub enum TlsConfig {
+    Disabled,
+    Opportunistic,
+    Required {
+        validate_hostname: bool,
+        ca: CaConfig,
+        client_key: Option<Blob>,
+        client_cert: Option<Blob>,
+    },
+}
+
 /// Constraints on RSA encryption parameters. In general, if a constraint is not specified, anything is allowed.
 #[derive(Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Clone)]
 pub struct RsaEncryptionPolicy {
@@ -158,6 +251,7 @@ pub struct RsaEncryptionPolicy {
 pub enum RsaEncryptionPaddingPolicy {
     Oaep { mgf: Option<MgfPolicy> },
     Pkcs1V15 {},
+    RawDecrypt {},
 }
 
 /// Constraints on RSA signature parameters. In general, if a constraint is not specified, anything is allowed.
@@ -204,11 +298,42 @@ pub struct RsaOptions {
     /// policy. The default for new keys is `[{}]` (no constraints).
     /// If (part of) a constraint is not specified, anything is allowed for that constraint.
     pub signature_policy: Vec<RsaSignaturePolicy>,
+    #[serde(default)]
+    pub minimum_key_length: Option<u32>,
+}
+
+#[derive(PartialEq, Eq, Debug, Serialize, Deserialize, Clone)]
+pub struct DsaOptions {
+    pub subgroup_size: Option<u32>,
+}
+
+/// LMS specific options
+#[derive(PartialEq, Eq, Debug, Serialize, Deserialize, Clone)]
+pub struct LmsOptions {
+    /// The height of the top level tree
+    pub l1_height: u32,
+    /// The height of the secondary tree
+    pub l2_height: u32,
+    /// The hash function to use
+    pub digest: Option<DigestAlgorithm>,
 }
 
 /// FPE-specific options.
 #[derive(PartialEq, Eq, Debug, Serialize, Deserialize, Clone)]
-pub struct FpeOptions {
+pub enum FpeOptions {
+    /// For specifying basic tokens
+    Basic(FpeOptionsBasic),
+    Advanced {
+        /// The structure of the data type.
+        format: FpeDataPart,
+        /// The user-friendly name for the data type that represents the input data.
+        description: Option<String>,
+    },
+}
+
+/// Basic FPE-specific options.
+#[derive(PartialEq, Eq, Debug, Serialize, Deserialize, Clone)]
+pub struct FpeOptionsBasic {
     /// The base for input data.
     pub radix: u32,
     /// The minimum allowed length for the input data.
@@ -225,11 +350,331 @@ pub struct FpeOptions {
     pub name: Option<String>,
 }
 
+/// Structure for specifying (part of) a complex tokenization data type.
+#[derive(PartialEq, Eq, Debug, Serialize, Deserialize, Clone)]
+#[serde(untagged)]
+pub enum FpeDataPart {
+    Encrypted(FpeEncryptedPart),
+    Literal {
+        /// The list of possible strings that make up this literal portion of the token.
+        literal: Vec<String>,
+    },
+    Compound(FpeCompoundPart),
+}
+
+/// Structure of a tokenized portion of a complex tokenization data type.
+#[derive(PartialEq, Eq, Debug, Serialize, Deserialize, Clone)]
+pub struct FpeEncryptedPart {
+    /// The minimum allowed length for this part (in chars).
+    pub min_length: u32,
+    /// The maximum allowed length for this part (in chars).
+    pub max_length: u32,
+    /// The character set to use for this part.
+    pub char_set: FpeCharSet,
+    /// Additional constraints that the token type must satisfy.
+    #[serde(default)]
+    pub constraints: Option<FpeConstraints>,
+    /// The characters to be preserved while encrypting or decrypting.
+    #[serde(default)]
+    pub preserve: Option<FpePreserveMask>,
+    /// The characters to be masked while performing masked decryption.
+    #[serde(default)]
+    pub mask: Option<FpePreserveMask>,
+}
+
+/// The character set to use for an encrypted portion of a complex tokenization data type.
+/// Characters should be specified as a list of pairs, where each pair [a, b] represents the
+/// range of characters from a to b, with both bounds being inclusive. A single character can
+/// be specified as [c, c].
+///
+/// Normally, each character is assigned a numeric value for FF1. The first character is
+/// assigned a value of 0, and subsequent characters are assigned values of 1, 2, and so on,
+/// up to the size of the character set. Note that the order of the ranges matters; characters
+/// appearing in later ranges are assigned higher numerical values compared to earlier
+/// characters. For instance, in the character set [['a', 'z'], ['0', '9']], the digits '0' to
+/// '9' are assigned values from 26 to 35, since they are listed after the 'a' to 'z' range.
+///
+/// In any case, ranges should not overlap with each other, and should not contain surrogate
+/// codepoints.
+pub type FpeCharSet = Vec<[char; 2]>;
+
+/// Constraints on a portion of a complex tokenization data type.
+#[derive(PartialEq, Eq, Debug, Serialize, Deserialize, Clone)]
+pub struct FpeConstraints {
+    /// Whether the token part should satisfy the Luhn checksum. It is an error to apply this
+    /// constraint to non-numeric parts, or for an encrypted part to be under more than one
+    /// Luhn check constraint. Also, if an encrypted part has a Luhn check constraint applied
+    /// to it and may contain at least one digit that is not preserved, it must not specify
+    /// any other constraints.
+    #[serde(default)]
+    pub luhn_check: Option<bool>,
+    /// Number that the token part should be greater than. This constraint can only be
+    /// specified on (non-compound) numeric encrypted parts guaranteed to preserve either
+    /// everything or nothing at all.
+    #[serde(default)]
+    pub num_gt: Option<usize>,
+    /// Number that the token part should be smaller than. This constraint can only be
+    /// specified on (non-compound) numeric encrypted parts guaranteed to preserve either
+    /// everything or nothing at all.
+    #[serde(default)]
+    pub num_lt: Option<usize>,
+    /// Numbers that the token part should not be equal to. It is an error to apply this
+    /// constraint to non-numeric parts.
+    #[serde(default)]
+    pub num_ne: Option<Vec<usize>>,
+    /// Specifies that this portion is supposed to represent a date, or part of one. If used,
+    /// no other constraints can be specified on this part.
+    #[serde(default)]
+    pub date: Option<FpeDateConstraint>,
+    /// The subparts to apply the constaints to. If not specified, the constraints will be
+    /// applied to all subparts (recursively).
+    pub applies_to: FpeConstraintsApplicability,
+}
+
+/// Possible date-related constraint types for a portion of a complex tokenization data type.
+#[derive(PartialEq, Eq, Debug, Serialize, Deserialize, Clone)]
+#[serde(untagged)]
+pub enum FpeDateConstraint {
+    /// Used to indicate that a token part represents a date, which should occur before and/or
+    /// after any specified bounds. The part should be a concatenation that contains either
+    /// - a Day part and a Month part
+    /// - a Month part and a Year part
+    /// - a Day part, a Month part, and a Year part
+    /// (with this constraint applying to those subparts). Each of the three choices above
+    /// corresponds to a particular FpeDate variant; using the wrong variant is an error.
+    /// Furthermore, the individual Month, Day, and/or Year parts that comprise the date cannot
+    /// appear under Or or Multiple compound part descendants of the overall Date part (i.e.,
+    /// when applying the Date constraint, the "paths" from the Date part to the Month, Day,
+    /// and/or Year parts can only "go through" concatenations, and not "through" Or or Multiple
+    /// parts). Those parts must also be free of any preserved digits, with the exception that
+    /// the overall date can be preserved, which must be done via setting the `preserve` field
+    /// on the overall date part itself or one of its ancestor parts (but not on the constituent
+    /// parts of the date).
+    ///
+    /// It is an error to "share" Day, Month, or Year parts across multiple dates.
+    Date(FpeDate),
+    /// Used to indicate that a token part represents a month, day, or year (either as part of a
+    /// date, or independently). The part should be a numeric encrypted part that is guaranteed
+    /// to either preserve all of its digits or preserve none of them, and cannot be involved in
+    /// any Luhn-check constraints.
+    DatePart(FpeDatePart),
+}
+
+/// Possible date-related constraint types that do not form a complete date (by themselves) for a
+/// complex tokenization data type.
+#[derive(PartialEq, Eq, Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "lowercase")]
+pub enum FpeDatePart {
+    /// Used to indicate that a token part represents a month. The part should be a number from 1
+    /// to 12, have its min_length field be at least 1, and have its max_length field be 2. Any
+    /// leading zero should be removed (unless the part is always 2 digits long, in which case a
+    /// leading zero may be needed).
+    Month,
+    /// Used to indicate that a token part represents a day. The part should be a number from 1 to
+    /// 31, have its min_length field be at least 1, and have its max_length field be 2. Any
+    /// leading zero should be removed (unless the part is always 2 digits long, in which case a
+    /// leading zero may be needed). Further restrictions apply when the Day part occurs within a
+    /// date; for instance, a date of 2/29/2000 is fine, but 4/31 is not.
+    Day,
+    /// Used to indicate that a token part represents a year, with any zero value being treated as
+    /// a leap year. The part should be a two to five digit number.
+    Year,
+}
+
+/// A structure for specifying a particular date consisting of a day and a month, for use in an
+/// FpeDate structure.
+#[derive(PartialEq, Eq, Debug, PartialOrd, Ord, Serialize, Deserialize, Clone)]
+pub struct FpeDayMonthDate {
+    /// The month, which should be a number from 1 to 12.
+    pub month: u8,
+    /// The day, which should be a number from 1 to either 29, 30, or 31, depending on the month
+    /// and year. Here, February is treated as having 29 days.
+    pub day: u8,
+}
+
+/// A structure for specifying a particular date consisting of a month and a year, for use in an
+/// FpeDate structure.
+#[derive(PartialEq, Eq, Debug, PartialOrd, Ord, Serialize, Deserialize, Clone)]
+pub struct FpeMonthYearDate {
+    /// The year, which should be a number less than 100000. Zero is treated as a leap year.
+    pub year: u32,
+    /// The month, which should be a number from 1 to 12.
+    pub month: u8,
+}
+
+/// A structure for specifying a particular date consisting of a day, month, and year, for use in
+/// an FpeDate structure.
+#[derive(PartialEq, Eq, Debug, PartialOrd, Ord, Serialize, Deserialize, Clone)]
+pub struct FpeDayMonthYearDate {
+    /// The year, which should be a number less than 100000. Zero is treated as a leap year.
+    pub year: u32,
+    /// The month, which should be a number from 1 to 12.
+    pub month: u8,
+    /// The day, which should be a number from 1 to either 28, 29, 30, or 31, depending on the
+    /// month and year.
+    pub day: u8,
+}
+
+/// A structure for specifying a token part representing a date that occurs after a specified date
+/// and/or occurs before a specified date. Depending on the subparts that make up the date, one of
+/// the three options is used.
+#[derive(PartialEq, Eq, Debug, Serialize, Deserialize, Clone)]
+pub enum FpeDate {
+    /// Represents a date that consists of a Month subpart, a Day subpart, and a Year subpart.
+    #[serde(rename = "dmy_date")]
+    DayMonthYear {
+        #[serde(default)]
+        before: Option<FpeDayMonthYearDate>,
+        #[serde(default)]
+        after: Option<FpeDayMonthYearDate>,
+    },
+    /// Represents a date that consists of a Month subpart and a Day subpart.
+    #[serde(rename = "month_day_date")]
+    MonthDay {
+        #[serde(default)]
+        before: Option<FpeDayMonthDate>,
+        #[serde(default)]
+        after: Option<FpeDayMonthDate>,
+    },
+    /// Represents a date that consists of a Month subpart and a Year subpart.
+    #[serde(rename = "month_year_date")]
+    MonthYear {
+        #[serde(default)]
+        before: Option<FpeMonthYearDate>,
+        #[serde(default)]
+        after: Option<FpeMonthYearDate>,
+    },
+}
+
+/// Structure of a compound portion of a complex tokenization data type, itself composed of
+/// smaller parts.
+#[derive(PartialEq, Eq, Debug, Serialize, Deserialize, Clone)]
+#[serde(untagged)]
+pub enum FpeCompoundPart {
+    /// Represents an OR of multiple structures.
+    Or {
+        /// The actual subparts that make up this compound part.
+        or: Vec<FpeDataPart>,
+        /// Additional constraints that the token type must satisfy.
+        #[serde(default)]
+        constraints: Option<FpeConstraints>,
+        /// Whether the entire OR should be preserved as-is (i.e., not tokenized). If this is
+        /// set, any descendant subparts cannot contain any preserve-related fields set.
+        #[serde(default)]
+        preserve: Option<bool>,
+        /// Whether the entire OR should be masked when doing masked decryption. If this is set,
+        /// any descendant subparts cannot contain any mask-related fields set.
+        #[serde(default)]
+        mask: Option<bool>,
+        /// The minimum allowed length for this part (in chars).
+        #[serde(default)]
+        min_length: Option<u32>,
+        /// The maximum allowed length for this part (in chars).
+        #[serde(default)]
+        max_length: Option<u32>,
+    },
+    /// Represents a concatenation of multiple structures (in a particular order).
+    Concat {
+        /// The actual subparts that make up this compound part, in order.
+        concat: Vec<FpeDataPart>,
+        /// Additional constraints that the token type must satisfy.
+        #[serde(default)]
+        constraints: Option<FpeConstraints>,
+        /// Whether the entire concat should be preserved as-is (i.e., not tokenized). If this is
+        /// set, any descendant subparts cannot contain any preserve-related fields set.
+        #[serde(default)]
+        preserve: Option<bool>,
+        /// Whether the entire concat should be masked when doing masked decryption. If this is
+        /// set, any descendant subparts cannot contain any mask-related fields set.
+        #[serde(default)]
+        mask: Option<bool>,
+        /// The minimum allowed length for this part (in chars).
+        #[serde(default)]
+        min_length: Option<u32>,
+        /// The maximum allowed length for this part (in chars).
+        #[serde(default)]
+        max_length: Option<u32>,
+    },
+    /// Indicates a part that is possibly repeated multiple times.
+    Multiple {
+        /// The subpart that may be repeated.
+        multiple: Box<FpeDataPart>,
+        /// The minimum number of times the subpart can be repeated.
+        min_repetitions: Option<usize>,
+        /// The maximum number of times the subpart can be repeated.
+        max_repetitions: Option<usize>,
+        /// Additional constraints that the token type must satisfy.
+        #[serde(default)]
+        constraints: Option<FpeConstraints>,
+        /// Whether the entire Multiple should be preserved as-is (i.e., not tokenized). If this
+        /// is set, the `multiple` subpart and its descendants cannot contain any preserve-related
+        /// fields set.
+        #[serde(default)]
+        preserve: Option<bool>,
+        /// Whether the entire Multiple should be masked when doing masked decryption. If this is
+        /// set, the `multiple` subpart and its descendants cannot contain any mask-related fields
+        /// set.
+        #[serde(default)]
+        mask: Option<bool>,
+        /// The minimum allowed length for this part (in chars).
+        #[serde(default)]
+        min_length: Option<u32>,
+        /// The maximum allowed length for this part (in chars).
+        #[serde(default)]
+        max_length: Option<u32>,
+    },
+}
+
+/// A structure indicating which indices in an encrypted part to mask or preserve.
+#[derive(Eq, PartialEq, Debug, Serialize, Deserialize, Clone)]
+#[serde(untagged)]
+pub enum FpePreserveMask {
+    /// Indicates that the entire encrypted part is to be preserved or masked.
+    Entire(All),
+    /// Indicates that only certain characters are to be preserved or masked. Indices are
+    /// Python-like; i.e., negative indices index from the back of the token portion, with
+    /// index -1 being the end of the array. (Indicating that nothing should be preserved
+    /// or masked can be done via an empty list, which is the default value for this enum.)
+    ByChars(Vec<isize>),
+}
+
+/// A structure indicating which subparts to which to apply a set of constraints.
+#[derive(Eq, PartialEq, Debug, Serialize, Deserialize, Clone)]
+#[serde(untagged)]
+pub enum FpeConstraintsApplicability {
+    /// Indicates that the constraints apply to the entire part (i.e., all of its subparts),
+    /// including any descendants. This is the default value for this enum and the only option
+    /// available for FpeEncryptedPart, literal, and OR subparts.
+    Simple(All),
+    /// An object representing the individual subparts that the constraints should apply to. This
+    /// is a BTreeMap where for each key-value pair, the key represents the "index" of the subpart
+    /// (with the first subpart having index 0), and the value is an FpeConstraintsApplicability
+    /// instance. Note that a Multiple part only allows for one possible key-value pair, since it
+    /// only contains one subpart.
+    ///
+    /// This cannot be used with OR parts; instead, specify constraints individually on each
+    /// relevant subpart.
+    BySubparts(HashMap<FpeSubpartIndex, FpeConstraintsApplicability>),
+}
+
+/// A helper enum with a single variant, All, which indicates that something should apply to an
+/// entire part. (This is here mainly to allow other untagged enums to work properly.)
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "lowercase")]
+pub enum All {
+    All,
+}
+
+/// An index for listing subparts of a compound part to which certain constraints are to be applied.
+/// For Concat parts, this is the zero-based index of the subpart in the `concat` field, and for
+/// Multiple parts, this is always 0 (due to a Multiple having only one subpart).
+pub type FpeSubpartIndex = usize;
+
 /// Approval policy.
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize, Clone)]
-pub struct ApprovalPolicy {
+pub struct QuorumPolicy {
     #[serde(default)]
-    pub quorum: Option<ApprovalPolicyQuorum>,
+    pub quorum: Option<Quorum>,
     #[serde(default)]
     pub user: Option<Uuid>,
     #[serde(default)]
@@ -238,9 +683,9 @@ pub struct ApprovalPolicy {
 
 /// Quorum approval policy.
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize, Clone)]
-pub struct ApprovalPolicyQuorum {
+pub struct Quorum {
     pub n: usize,
-    pub members: Vec<ApprovalPolicy>,
+    pub members: Vec<QuorumPolicy>,
     #[serde(flatten)]
     pub config: ApprovalAuthConfig,
 }
@@ -285,11 +730,151 @@ pub enum PublishPublicKeyConfig {
     Disabled,
 }
 
+#[derive(Copy, Debug, Eq, PartialEq, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "snake_case")]
+pub enum LegacyKeyPolicy {
+    Allowed,
+    Prohibited,
+    UnprotectOnly,
+}
+
+#[derive(PartialEq, Eq, Debug, Serialize, Deserialize, Clone)]
+pub struct CryptographicPolicy {
+    pub aes: Option<AesOptions>,
+    pub des: Option<DesOptions>,
+    pub des3: Option<Des3Options>,
+    pub rsa: Option<RsaOptions>,
+    pub dsa: Option<DsaOptions>,
+    pub ec: Option<EcOptions>,
+    pub opaque: Option<OpaqueOptions>,
+    pub hmac: Option<HmacOptions>,
+    pub secret: Option<SecretOptions>,
+    pub certificate: Option<CertificateOptions>,
+    pub key_ops: Option<KeyOperations>,
+    pub legacy_policy: Option<LegacyKeyPolicy>,
+}
+
+pub type Secs = u64;
+
+#[derive(Copy, PartialEq, Eq, Debug, Serialize, Deserialize, Clone)]
+pub struct KeyHistoryPolicy {
+    pub undo_time_window: Secs,
+}
+
+#[derive(PartialEq, Eq, Debug, Serialize, Deserialize, Clone)]
+pub struct HistoryItemState {
+    pub activation_date: Option<Time>,
+    #[serde(default)]
+    pub activation_undo_window: Option<Secs>,
+    pub revocation_reason: Option<RevocationReason>,
+    pub compromise_date: Option<Time>,
+    pub deactivation_date: Option<Time>,
+    #[serde(default)]
+    pub deactivation_undo_window: Option<Secs>,
+    pub destruction_date: Option<Time>,
+    pub deletion_date: Option<Time>,
+    pub state: SobjectState,
+    pub key_ops: KeyOperations,
+    pub public_only: bool,
+    pub has_key: bool,
+    pub rotation_policy: Option<RotationPolicy>,
+}
+
+#[derive(PartialEq, Eq, Debug, Serialize, Deserialize, Clone)]
+pub struct HistoryItem {
+    pub id: Uuid,
+    pub state: HistoryItemState,
+    pub created_at: Time,
+    pub expiry: Time,
+}
+
+#[derive(PartialEq, Eq, Debug, Serialize, Deserialize, Clone)]
+pub struct AesOptions {
+    pub key_sizes: Option<Vec<u32>>,
+    pub fpe: Option<FpeOptions>,
+    pub tag_length: Option<i32>,
+    pub cipher_mode: Option<CipherMode>,
+    pub random_iv: Option<bool>,
+    pub iv_length: Option<i32>,
+}
+
+#[derive(PartialEq, Eq, Debug, Serialize, Deserialize, Clone)]
+pub struct DesOptions {
+    pub cipher_mode: Option<CipherMode>,
+    pub random_iv: Option<bool>,
+}
+
+#[derive(PartialEq, Eq, Debug, Serialize, Deserialize, Clone)]
+pub struct OpaqueOptions {}
+
+#[derive(PartialEq, Eq, Debug, Serialize, Deserialize, Clone)]
+pub struct HmacOptions {
+    pub minimum_key_length: Option<u32>,
+}
+
+#[derive(PartialEq, Eq, Debug, Serialize, Deserialize, Clone)]
+pub struct SecretOptions {}
+
+#[derive(PartialEq, Eq, Debug, Serialize, Deserialize, Clone)]
+pub struct CertificateOptions {}
+
+#[derive(PartialEq, Eq, Debug, Serialize, Deserialize, Clone)]
+pub struct Des3Options {
+    pub key_sizes: Option<Vec<u32>>,
+    pub cipher_mode: Option<CipherMode>,
+    pub random_iv: Option<bool>,
+    pub iv_length: Option<i32>,
+}
+
+#[derive(PartialEq, Eq, Debug, Serialize, Deserialize, Clone)]
+pub struct EcOptions {
+    pub elliptic_curves: Option<Vec<EllipticCurve>>,
+}
+
+/// This describes an external object. Virtual keys in SDKMS store this information instead of the key material.
+#[derive(PartialEq, Eq, Debug, Serialize, Deserialize, Clone)]
+pub struct ExternalSobjectInfo {
+    /// The ID of the external object in the external HSM.
+    pub id: ExternalKeyId,
+    /// The group which corresponds to the external HSM.
+    pub hsm_group_id: Uuid,
+}
+
+#[derive(PartialEq, Eq, Debug, Serialize, Deserialize, Clone)]
+#[serde(untagged)]
+pub enum ExternalKeyId {
+    Pkcs11 { id: Blob, label: Blob },
+    Fortanix { id: Uuid },
+    AwsKms { key_arn: String, key_id: Uuid },
+    AzureKeyVault { version: Uuid, label: String },
+    Wrapped {},
+}
+
+#[derive(PartialEq, Eq, Debug, Serialize, Deserialize, Clone)]
+pub struct RotationPolicy {
+    #[serde(flatten)]
+    pub interval: Option<RotationInterval>,
+    #[serde(default)]
+    pub effective_at: Option<Time>,
+    pub deactivate_rotated_key: bool,
+}
+
+#[derive(PartialEq, Eq, Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "snake_case")]
+pub enum RotationInterval {
+    IntervalDays(u32),
+    IntervalMonths(u32),
+}
+
 #[derive(Eq, PartialEq, Debug, Serialize, Deserialize, Clone)]
 pub struct Sobject {
     pub acct_id: Uuid,
     #[serde(default)]
     pub activation_date: Option<Time>,
+    #[serde(default)]
+    pub aes: Option<AesOptions>,
+    #[serde(default)]
+    pub compliant_with_policies: Option<bool>,
     #[serde(default)]
     pub compromise_date: Option<Time>,
     pub created_at: Time,
@@ -299,14 +884,30 @@ pub struct Sobject {
     #[serde(default)]
     pub deactivation_date: Option<Time>,
     #[serde(default)]
+    pub deletion_date: Option<Time>,
+    #[serde(default)]
+    pub des: Option<DesOptions>,
+    #[serde(default)]
+    pub des3: Option<Des3Options>,
+    #[serde(default)]
     pub description: Option<String>,
     #[serde(default)]
+    pub destruction_date: Option<Time>,
+    #[serde(default)]
     pub deterministic_signatures: Option<bool>,
+    #[serde(default)]
+    pub dsa: Option<DsaOptions>,
     #[serde(default)]
     pub elliptic_curve: Option<EllipticCurve>,
     pub enabled: bool,
     #[serde(default)]
+    pub external: Option<ExternalSobjectInfo>,
+    #[serde(default)]
     pub fpe: Option<FpeOptions>,
+    #[serde(default)]
+    pub history: Option<Vec<HistoryItem>>,
+    #[serde(default)]
+    pub kcv: Option<String>,
     pub key_ops: KeyOperations,
     #[serde(default)]
     pub key_size: Option<u32>,
@@ -315,6 +916,8 @@ pub struct Sobject {
     pub lastused_at: Time,
     #[serde(default)]
     pub links: Option<KeyLinks>,
+    #[serde(default)]
+    pub lms: Option<LmsOptions>,
     #[serde(default)]
     pub name: Option<String>,
     pub never_exportable: Option<bool>,
@@ -328,7 +931,11 @@ pub struct Sobject {
     #[serde(default)]
     pub revocation_reason: Option<RevocationReason>,
     #[serde(default)]
+    pub rotation_policy: Option<RotationPolicy>,
+    #[serde(default)]
     pub rsa: Option<RsaOptions>,
+    #[serde(default)]
+    pub scheduled_rotation: Option<Time>,
     #[serde(default)]
     pub state: Option<SobjectState>,
     #[serde(default)]
@@ -423,6 +1030,7 @@ pub enum SobjectDescriptor {
     Kid(Uuid),
     Name(String),
     TransientKey(Blob),
+    Inline { value: Blob, obj_type: ObjectType },
 }
 
 /// Request for second factor authentication with a U2f device.
@@ -432,12 +1040,4 @@ pub struct U2fAuthRequest {
     pub key_handle: Blob,
     pub signature_data: Blob,
     pub client_data: Blob,
-}
-
-#[derive(Debug, Eq, PartialEq, Copy, Serialize, Deserialize, Clone)]
-pub enum SobjectState {
-    PreActive,
-    Active,
-    Deactivated,
-    Compromised,
 }
